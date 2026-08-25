@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <!-- גרדיאנט רקע חלל עמוק -->
+    <radialGradient id="spaceBg" cx="50%" cy="50%" r="70%">
+      <stop offset="0%" stop-color="#0a0a25" />
+      <stop offset="100%" stop-color="#020208" />
+    </radialGradient>
+    
+    <!-- גרדיאנט לקווי הקשר (סגול לטורקיז) -->
+    <linearGradient id="lineGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00f0ff" />
+      <stop offset="100%" stop-color="#a855f7" />
+    </linearGradient>
+
+    <!-- אפקט זריחה לכוכבים -->
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="12" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <!-- רקע מעוגל (כמו אפליקציה) -->
+  <rect width="512" height="512" rx="120" fill="url(#spaceBg)" />
+
+  <!-- כוכבים קטנים ברקע (גלקסיה) -->
+  <circle cx="120" cy="100" r="3" fill="#ffffff" opacity="0.6" />
+  <circle cx="400" cy="150" r="2" fill="#ffffff" opacity="0.4" />
+  <circle cx="80" cy="380" r="2.5" fill="#00f0ff" opacity="0.5" />
+  <circle cx="430" cy="400" r="4" fill="#a855f7" opacity="0.3" />
+
+  <!-- רשת הקשרים הלוגיים (AST) -->
+  <path d="M 256 256 L 140 160" stroke="url(#lineGrad)" stroke-width="8" opacity="0.8" />
+  <path d="M 256 256 L 390 190" stroke="url(#lineGrad)" stroke-width="8" opacity="0.8" />
+  <path d="M 256 256 L 180 400" stroke="#00f0ff" stroke-width="8" opacity="0.6" />
+  <path d="M 256 256 L 380 370" stroke="#a855f7" stroke-width="8" opacity="0.6" />
+
+  <!-- כוכבים (Nodes) בקצוות -->
+  <circle cx="140" cy="160" r="24" fill="#00f0ff" filter="url(#glow)" />
+  <circle cx="390" cy="190" r="20" fill="#a855f7" filter="url(#glow)" />
+  <circle cx="180" cy="400" r="22" fill="#ff0055" filter="url(#glow)" />
+  <circle cx="380" cy="370" r="18" fill="#00f0ff" filter="url(#glow)" />
+
+  <!-- הכוכב המרכזי (Core) -->
+  <circle cx="256" cy="256" r="60" fill="#00f0ff" filter="url(#glow)" />
+  <circle cx="256" cy="256" r="45" fill="#020208" />
+
+  <!-- סמלי קוד בתוך הכוכב המרכזי -->
+  <path d="M 240 230 L 215 256 L 240 282" fill="none" stroke="#00f0ff" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" />
+  <path d="M 272 230 L 297 256 L 272 282" fill="none" stroke="#00f0ff" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" />
+</svg>
