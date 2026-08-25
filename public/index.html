@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <title>Code-Galaxy 3D AI</title>
+  <script src="https://unpkg.com/3d-force-graph"></script>
+  <script src="https://unpkg.com/three"></script>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- 🚀 מסך פתיחה: בחירת פרויקט -->
+  <div id="project-modal" class="modal-overlay">
+    <div class="modal-content" style="max-width: 700px;">
+      <h2>ברוכים הבאים ל-Code Galaxy</h2>
+      <p>בחר פרויקט כדי להתחיל לחקור את הארכיטקטורה שלו בתלת-ממד</p>
+
+      <!-- אזור בחירת קבצים מהמחשב -->
+      <div style="display: flex; gap: 10px; margin: 20px 0;">
+        
+        <!-- 📂 אזור העלאה מאוחד וממורכז -->
+        <div id="drop-zone-box" class="drop-zone" style="margin: 25px auto; width: 85%; max-width: 500px; border: 2px dashed #00f0ff; border-radius: 14px; padding: 35px 20px; text-align: center; cursor: pointer; background: rgba(0,240,255,0.03); transition: 0.3s;"
+            ondragover="event.preventDefault(); this.classList.add('dragover');"
+            ondragleave="this.classList.remove('dragover');"
+            ondrop="handleDrop(event)"
+            onclick="document.getElementById('unified-file-input').click()">
+          
+          <div style="font-size: 42px; margin-bottom: 12px;">🌌</div>
+          <div style="font-size: 18px; font-weight: bold; color: #00f0ff;">גרור לכאן את הפרויקט שלך (תיקייה או קבצים)</div>
+          <div style="font-size: 13px; color: #aaa; margin-top: 8px;">או לחץ כאן לבחירת תיקיית פרויקט מהמחשב</div>
+          
+          <!-- אינפוט נסתר שקורא את הקבצים -->
+          <input type="file" id="unified-file-input" multiple webkitdirectory directory style="display: none;" onchange="handleLocalFiles(event)">
+        </div>
+        
+      </div>
+
+      <div class="divider">או</div>
+
+      <!-- אזור הדבקת קישור לגיטהאב -->
+      <div class="github-zone">
+        <input type="text" id="github-url" placeholder="הדבק קישור ל-GitHub Repository...">
+        <button onclick="loadFromGithub()">טען מ-GitHub</button>
+      </div>
+
+      <!-- 🕒 פרויקטים אחרונים -->
+        <div id="recent-projects-section" style="display: none; margin-top: 30px; border-top: 1px solid #00f0ff44; padding-top: 20px;">
+          <h3 style="color: #a855f7; margin-top: 0; margin-bottom: 15px; font-size: 16px; text-align: right;">🕒 פרויקטים אחרונים:</h3>
+          <div id="recent-projects-list" class="recent-projects-grid"></div>
+        </div>
+
+      <!-- 💡 אזור הסבר: איך זה עובד? -->
+      <div class="onboarding-section">
+        <h3>איך זה עובד?</h3>
+        <div class="steps-container">
+          <!-- הוספנו פקודת onclick לכל כרטיסייה לניווט חכם -->
+          <div class="step-card" onclick="openInfoModal('info-filtering')">
+            <div class="step-icon">📂</div>
+            <h4>1. בחירת קוד</h4>
+            <p>טען פרויקט מהמחשב או מ-GitHub בצורה מאובטחת לחלוטין.</p>
+          </div>
+          <div class="step-card" onclick="openInfoModal('info-architecture')">
+            <div class="step-icon">🌌</div>
+            <h4>2. חקר בתלת-ממד</h4>
+            <p>המערכת תמפה את הארכיטקטורה ותבנה גלקסיה אינטראקטיבית.</p>
+          </div>
+          <div class="step-card" onclick="openInfoModal('info-ai')">
+            <div class="step-icon">🤖</div>
+            <h4>3. שיפור עם AI</h4>
+            <p>שוחח עם Gemini, בקש שדרוגים וראה שינויים נצבעים בלייב!</p>
+          </div>
+        </div>
+      </div>
+      
+      <div id="loading-status" style="margin-top: 20px; color: #00f0ff; font-weight: bold; display: none;">
+        ⏳ מנתח פרויקט, אנא המתן...
+      </div>
+    </div>
+  </div>
+
+  <!-- 📖 מרכז המידע והמדריך למשתמש (Modal חדש) -->
+  <div id="info-modal" class="modal-overlay" style="display: none; z-index: 300;">
+    <div class="modal-content" style="max-width: 800px; text-align: right; padding: 40px; position: relative;">
+      <button onclick="closeInfoModal()" style="position: absolute; top: 15px; left: 15px; background: none; border: none; color: #ff0055; font-size: 24px; cursor: pointer; transition: 0.2s;" onmouseover="this.style.transform='scale(1.2)'" onmouseout="this.style.transform='scale(1)'">✕</button>
+      <h2 style="color: #a855f7; text-align: center; margin-top: 0;">🌌 Code Galaxy - מרכז המידע</h2>
+      <div class="divider"></div>
+      
+      <!-- אזור נגלל פנימי -->
+      <div id="info-scroll-area" style="max-height: 60vh; overflow-y: auto; padding-left: 15px; padding-right: 5px;">
+        
+        <div id="info-architecture" class="info-section">
+          <h3>1. הקסם מאחורי הקלעים: מיפוי וארכיטקטורה</h3>
+          <p>Code Galaxy אינה סתם עורך קוד – היא מנוע ויזואליזציה. כאשר פרויקט נטען, המערכת סורקת את הקוד ומפענחת אותו (AST) כדי לזהות פונקציות, מחלקות וקשרי ייבוא (Imports). לאחר מכן, היא משתמשת במודל הוקטורים של גוגל (Gemini Embeddings) כדי להבין את <i>המשמעות הלוגית</i> של הקוד, ומייצרת גלקסיה תלת-ממדית שבה קבצים קשורים נמשכים זה לזה באמצעות קווים סמנטיים (סגולים) ומבניים (כחולים).</p>
+        </div>
+
+        <div id="info-filtering" class="info-section">
+          <h3>2. סינון חכם לביצועי שיא</h3>
+          <p>כדי להבטיח שהגלקסיה שלך תעבוד בצורה חלקה וללא תקיעות, המערכת מפעילה סינון קפדני:</p>
+          <ul>
+            <li><b>שפות נתמכות:</b> המערכת מזהה ומנתחת שפות רבות, ביניהן: JS, TS, Python, Java, C#, C++, Go, Dart, HTML, CSS, JSON.</li>
+            <li><b>השמטות אוטומטיות:</b> ספריות צד-שלישי, תיקיות בנייה וקובצי תצורה כבדים (כגון <code>node_modules</code>, <code>.git</code>, <code>dist</code>, <code>build</code>, <code>data</code>, <code>package-lock.json</code>) מסוננים אוטומטית החוצה.</li>
+            <li><b>מגבלת גודל:</b> קבצים השוקלים מעל 500KB מושמטים אוטומטית כדי לשמור על ביצועי ה-AI וזמני הטעינה.</li>
+          </ul>
+        </div>
+
+        <div id="info-ai" class="info-section">
+          <h3>3. המוח של המערכת: עוזר ה-AI שלך</h3>
+          <p>המערכת מצוידת בעוזר וירטואלי חכם תלוי-הקשר (Context-Aware), הפועל בשני מצבים:</p>
+          <ul>
+            <li><b>הצ'אט הגלובלי:</b> פועל כאשר אינך ממוקד בקובץ ספציפי. הוא רואה את הפרויקט בשלמותו (RAG), מבין את הארכיטקטורה, ויודע לענות על שאלות רוחביות (למשל: "איך עובד מנגנון ההזדהות בפרויקט?").</li>
+            <li><b>הצ'אט המקומי:</b> כאשר תלחץ על קובץ ספציפי, העוזר יתמקד בו. כאן תוכל לבקש שיפורי קוד (Refactor), הסברים נקודתיים, ואפילו להשתמש במנגנון ה-<b>Smart Split</b> שמפצל אוטומטית קבצים ארוכים ומייצר "כוכבים" חדשים בגלקסיה.</li>
+          </ul>
+        </div>
+
+        <div id="info-diff" class="info-section">
+          <h3>4. סביבת עבודה בטוחה (Safe Workspace & Diff)</h3>
+          <p>הקוד המקורי שלך בטוח לחלוטין. כאשר ה-AI מציע שינוי, תיקון או פיצול קובץ, הפעולה לא נשמרת מיד בדיסק המקומי. המערכת מציגה לך תחילה תצוגה מקדימה מפורטת בעורך הימני, הכוללת מנגנון השוואה (Diff) המדגיש באדום את הקוד שיוסר ובירוק את הקוד שיתווסף. רק לאחר שתאשר את הפעולה ותלחץ על "החל שינויים", המערכת תעדכן את הקובץ המקורי במחשב שלך.</p>
+        </div>
+
+        <div id="info-privacy" class="info-section">
+          <h3>5. פרטיות, מטמון וניהול משאבים</h3>
+          <ul>
+            <li><b>עיבוד מקומי ומטמון (Cache):</b> נתוני הניתוח של הקוד נשמרים מקומית במנגנון מטמון חכם. טעינה חוזרת של פרויקט שכבר נותח תתרחש בשבריר שנייה מבלי לפנות שוב לשרת או ל-API.</li>
+            <li><b>פרויקטים מ-GitHub:</b> פרויקטים מיובאים עוברים שיבוט (Clone) לזיכרון המקומי לטובת הניתוח. ברגע שתמחק פרויקט מרשימת "היסטוריית הפרויקטים", הוא יושמד לחלוטין מהשרת המקומי.</li>
+          </ul>
+        </div>
+
+        <div id="info-disclaimer" class="info-section" style="background: rgba(255,0,85,0.05); border-right: 4px solid #ff0055; padding: 15px; margin-top: 25px; border-radius: 8px;">
+          <h3 style="color: #ff4444; margin-top: 0;">6. הצהרת אחריות (Disclaimer)</h3>
+          <p style="margin-bottom: 0; font-size: 13px; color: #ccc;"><i>Code Galaxy נועדה לשמש ככלי עזר מתקדם למפתחים ולספק המלצות קוד מבוססות בינה מלאכותית. עם זאת, עוזרי AI עשויים לייצר לעיתים קוד שגוי או לא מאובטח. האחריות הבלעדית על בדיקת הקוד, בחינת התאימות שלו, והטמעתו הסופית בפרויקט המקורי חלה על המשתמש בלבד.</i></p>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- 🛡️ חלונית אישור ונעילת מסך (Upload Overlay) -->
+  <div id="confirm-loading-overlay" class="modal-overlay" style="display: none; z-index: 200;">
+    <div class="modal-content" style="max-width: 400px; text-align: center;">
+      
+      <!-- שלב 1: בקשת אישור -->
+      <div id="confirm-step">
+        <div style="font-size: 40px; margin-bottom: 10px;">🛡️</div>
+        <h3 style="color: #00f0ff; margin-top: 0;">האם להתחיל בסריקה?</h3>
+        <p id="confirm-message" style="color: #aaa; margin-bottom: 25px;"></p>
+        <div style="display: flex; gap: 15px; justify-content: center;">
+          <button id="cancel-scan-btn" style="background: rgba(255,0,85,0.1); border: 1px solid #ff0055; color: #ff0055; padding: 10px 20px; border-radius: 8px; cursor: pointer; transition: 0.2s;">ביטול</button>
+          <button id="approve-scan-btn" style="background: linear-gradient(135deg, #00f0ff, #0077ff); border: none; color: #fff; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: bold; transition: 0.2s;">🚀 התחל סריקה</button>
+        </div>
+      </div>
+
+      <!-- שלב 2: טעינה (שעון חול + פס טעינה) -->
+      <div id="loading-step" style="display: none;">
+        <h3 style="color: #00f0ff; margin-top: 0; font-size: 22px;">הפרויקט בטעינה...</h3>
+        <p id="loading-message" style="color: #aaa; margin-bottom: 25px; font-size: 15px;"></p>
+        
+        <div class="hourglass-spinner">⏳</div>
+        
+        <!-- פס טעינה ואחוזים -->
+        <div style="width: 100%; background: rgba(255,255,255,0.1); border-radius: 10px; height: 12px; margin-top: 30px; overflow: hidden; position: relative;">
+          <div id="progress-bar-fill" style="width: 0%; height: 100%; background: linear-gradient(90deg, #a855f7, #00f0ff); transition: width 0.3s ease-out;"></div>
+        </div>
+        <div id="progress-text" style="margin-top: 8px; font-weight: bold; color: #00f0ff; font-size: 16px;">0%</div>
+      </div>
+      
+    </div>
+  </div>
+
+  <!-- 🔍 תיבת חיפוש וסינון במרחב -->
+  <div id="search-box">
+    <input type="text" id="search-input" placeholder="🔍 חפש קובץ בגלקסיה..." oninput="handleSearch()">
+    
+    <!-- 🆕 מתג קשרי AI -->
+    <div style="margin-top: 12px; display: flex; align-items: center; gap: 8px; padding: 0 5px;">
+      <label class="switch">
+        <input type="checkbox" id="semantic-toggle" onchange="toggleSemanticLinks()" checked>
+        <span class="slider round"></span>
+      </label>
+      <span style="font-size: 13px; color: #a855f7; font-weight: bold; text-shadow: 0 0 5px rgba(168,85,247,0.5);">הצג קשרים לוגיים (AI)</span>
+    </div>
+
+    <div id="search-results"></div>
+  </div>
+
+  <!-- 🏠 כפתור חזרה למסך הראשי -->
+  <button id="home-btn" onclick="showModal()">
+    <span>🌌</span> חזור למסך הפרויקטים
+  </button>
+
+  <!-- 🎛️ חלונית שמאלית (רק לנתוני הקובץ וכפתורים) -->
+  <div id="sidebar">
+    <button class="close-btn" onclick="closeSidebar()">✕</button>
+    <div class="file-title" id="file-title">שם הקובץ</div>
+    <div style="font-size: 12px; color: #aaa; margin-bottom: 15px;" id="file-path">path/to/file.js</div>
+
+    <div class="stat-card">שורות קוד: <b id="file-lines">0</b></div>
+    <div class="stat-card">סיבוכיות ציקלומטית: <b id="file-complexity">0</b></div>
+
+    <button class="refactor-btn" onclick="requestRefactor()">⚡ שפר קוד עם AI (Refactor)</button>
+    <button class="open-code-btn" onclick="openInEditor()">📝 פתח קובץ בעורך הקוד</button>
+    <button class="expand-sub-btn" onclick="toggleSubEntities()">🪐 חקור תת-ישויות (פונקציות / מחלקות)</button>
+  </div>
+
+  <!-- 🌍 צ'אט AI תלוי-הקשר (גלובלי + מקומי) -->
+  <button id="global-chat-btn" onclick="toggleGlobalChat()">🤖 שאל את הגלקסיה</button>
+  
+  <div id="global-chat-window">
+    <div class="global-chat-header">
+      <span id="chat-title">עוזר AI גלובלי 🌍</span>
+      <button onclick="toggleGlobalChat()" style="background:none; border:none; color:#fff; cursor:pointer; font-size:16px;">✕</button>
+    </div>
+    <div id="global-chat-messages">
+      <div class="msg ai" style="margin-bottom: 5px;">
+        <span>היי! אני רואה את כל הפרויקט. מה תרצה לדעת?</span>
+      </div>
+    </div>
+    <div class="global-chat-input">
+      <input type="text" id="global-chat-input" placeholder="שאל את ה-AI...">
+      <button onclick="sendUnifiedMessage()">שלח</button>
+    </div>
+  </div>
+
+  <!-- 📝 עורך קוד ימני נגרר -->
+  <div id="editor-panel">
+    <div id="editor-resizer"></div>
+    
+    <!-- 🎛️ כותרת וכפתורי פעולה מאוגדים יחד -->
+    <div style="display: flex; justify-content: space-between; align-items: center; padding: 15px 20px 10px 20px; border-bottom: 1px solid #00f0ff44;">
+      
+      <!-- צד ימין: כותרת הקובץ -->
+      <div class="file-title" id="editor-title" style="margin: 0; font-size: 18px;">שם הקובץ</div>
+      
+      <!-- צד שמאל: קבוצת כפתורים (העתקה + סגירה) -->
+      <div style="display: flex; gap: 15px; align-items: center;">
+        <button onclick="copyEditorContent()" class="copy-editor-btn">📋 העתק קוד</button>
+        <button onclick="closeEditor()" style="background: none; border: none; color: #ff0055; font-size: 22px; cursor: pointer; padding: 0; transition: transform 0.2s;" onmouseover="this.style.transform='scale(1.2)'" onmouseout="this.style.transform='scale(1)'" title="סגור חלונית">✕</button>
+      </div>
+
+    </div>
+
+    <div id="editor-body" dir="ltr" style="text-align: left;">
+      <pre><code id="editor-content">טוען קוד...</code></pre>
+    </div>
+  </div>
+
+  <div id="3d-graph" dir="ltr"></div>
+
+  <!-- 🌍 כפתור וצ'אט גלובלי לפרויקט -->
+  <button id="global-chat-btn" onclick="toggleGlobalChat()">🤖 שאל את הגלקסיה</button>
+  
+  <div id="global-chat-window">
+    <div class="global-chat-header">
+      <span>עוזר AI גלובלי</span>
+      <button onclick="toggleGlobalChat()" style="background:none; border:none; color:#fff; cursor:pointer; font-size:16px;">✕</button>
+    </div>
+    <div id="global-chat-messages">
+      <div class="msg ai" style="margin-bottom: 5px;">
+        <span>היי! אני רואה את כל הפרויקט. מה תרצה לדעת?</span>
+      </div>
+    </div>
+    <div class="global-chat-input">
+      <input type="text" id="global-chat-input" placeholder="שאל שאלה על כל הפרויקט...">
+      <button onclick="sendGlobalMessage()">שלח</button>
+    </div>
+  </div>
+
+  
+  <script src="app.js"></script>
+</body>
+</html>

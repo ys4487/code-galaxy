@@ -1,0 +1,21 @@
+{
+  "name": "code-galaxy",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@babel/parser": "^8.0.4",
+    "@babel/traverse": "^8.0.4",
+    "@lancedb/lancedb": "^0.37.1",
+    "dotenv": "^17.4.2",
+    "ws": "^8.21.3"
+  }
+}

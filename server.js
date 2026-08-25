@@ -1,0 +1,397 @@
+require('dotenv').config();
+const http = require('http');
+const fs = require('fs');
+const path = require('path');
+const zlib = require('zlib');
+const { exec } = require('child_process');
+
+// ייבוא המודולים החדשים שלנו
+const { buildGalaxyData } = require('./src/api/analyzer');
+const { handleChatStream } = require('./src/api/chat');
+// 🆕 מאגר גלובלי לשמירת התקדמות הסריקה
+const scanProgressMap = {};
+
+// --- 🕒 מנגנון היסטוריית פרויקטים ---
+const historyFile = path.join(process.cwd(), 'data', 'history.json');
+
+function getHistory() {
+  if (!fs.existsSync(historyFile)) return [];
+  try { return JSON.parse(fs.readFileSync(historyFile, 'utf-8')); } catch(e) { return []; }
+}
+
+function saveHistory(history) {
+  const dir = path.dirname(historyFile);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(historyFile, JSON.stringify(history, null, 2));
+}
+
+function upsertProjectToHistory(id, type, name) {
+  let history = getHistory();
+  const existingIndex = history.findIndex(p => p.id === id);
+  const now = new Date().toISOString();
+  
+  if (existingIndex >= 0) {
+    history[existingIndex].lastAccessed = now;
+    const [item] = history.splice(existingIndex, 1); // שולף אותו
+    history.unshift(item); // ודוחף אותו לראש הרשימה
+  } else {
+    history.unshift({ id, type, name, lastAccessed: now });
+  }
+  
+  history = history.slice(0, 10); // שומר רק את ה-10 האחרונים כדי לא להעמיס
+  saveHistory(history);
+}
+
+const server = http.createServer((req, res) => {
+  // 1. הגשת קבצים סטאטיים (HTML, CSS, JS)
+  if (req.method === 'GET' && (req.url === '/' || req.url === '/index.html')) {
+    const html = fs.readFileSync(path.join(__dirname, 'public', 'index.html'));
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    return res.end(html);
+  }
+
+  if (req.method === 'GET' && req.url === '/style.css') {
+    res.writeHead(200, { 'Content-Type': 'text/css' });
+    return res.end(fs.readFileSync(path.join(__dirname, 'public', 'style.css')));
+  }
+
+  if (req.method === 'GET' && req.url === '/app.js') {
+    res.writeHead(200, { 'Content-Type': 'application/javascript' });
+    return res.end(fs.readFileSync(path.join(__dirname, 'public', 'app.js')));
+  }
+
+  // 📥 קליטת פרויקט מגיטהאב, ניתוח ומחיקה
+  if (req.method === 'POST' && req.url === '/api/analyze-github') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', () => {
+      try {
+        const { repoUrl } = JSON.parse(body);
+        if (!repoUrl || !repoUrl.includes('github.com')) {
+          res.writeHead(400); return res.end(JSON.stringify({ error: 'קישור לא תקין. נדרש קישור לגיטהאב.' }));
+        }
+
+        // 🆕 התיקון לגיטהאב: תיקייה קבועה לפי שם הריפו
+        const repoName = repoUrl.split('/').pop().replace('.git', '');
+        const projectId = 'repo_' + repoName;
+        const tempPath = path.join(process.cwd(), 'data', projectId);
+
+        // 🧹 ניקוי שאריות מהעלאות קודמות
+        if (fs.existsSync(tempPath)) {
+          fs.rmSync(tempPath, { recursive: true, force: true });
+        }
+
+        console.log(`📥 מתחיל הורדה מגיטהאב: ${repoUrl}`);
+        exec(`git clone --depth 1 ${repoUrl} ${tempPath}`, async (error) => {
+          if (error) {
+            console.error(error);
+            res.writeHead(500); return res.end(JSON.stringify({ error: 'שגיאה בהורדת הפרויקט מגיטהאב.' }));
+          }
+          
+          console.log(`🚀 מנתח את הפרויקט שירד: ${projectId}`);
+          try {
+            const graphData = await buildGalaxyData(tempPath);
+            upsertProjectToHistory(projectId, 'github', repoName);
+            zlib.gzip(JSON.stringify(graphData), (err, buffer) => {
+              res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Encoding': 'gzip' });
+              res.end(buffer);
+            });
+          } catch (analyzeErr) {
+            res.writeHead(500); res.end(JSON.stringify({ error: 'שגיאה בניתוח הקוד: ' + analyzeErr.message }));
+          }
+        });
+      } catch (e) {
+        res.writeHead(500); res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+    return;
+  }
+
+  // 📂 קליטת פרויקט מקומי (תיקייה), ניתוח ומחיקה
+  if (req.method === 'POST' && req.url === '/api/analyze-local-folder') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', async () => {
+      try {
+        const { files, scanId } = JSON.parse(body);
+        if (!files || files.length === 0) {
+          res.writeHead(400); return res.end(JSON.stringify({ error: 'לא נשלחו קבצים' }));
+        }
+
+        // 🆕 התיקון: תיקייה קבועה לפי שם הפרויקט ולא לפי שעון!
+        const projectName = files[0].path.split('/')[0] || 'local_project';
+        const projectId = 'local_' + projectName;
+        const tempPath = path.join(process.cwd(), 'data', projectId);
+
+        // 🧹 ניקוי שאריות מהעלאות קודמות
+        if (fs.existsSync(tempPath)) {
+          fs.rmSync(tempPath, { recursive: true, force: true });
+        }
+
+        if (scanId) scanProgressMap[scanId] = { current: 0, total: files.length };
+
+        for (const file of files) {
+          const fullFilePath = path.join(tempPath, file.path);
+          const dir = path.dirname(fullFilePath);
+          fs.mkdirSync(dir, { recursive: true });
+          fs.writeFileSync(fullFilePath, file.content, 'utf-8');
+        }
+
+        console.log(`🚀 מנתח פרויקט מקומי: ${projectId}`);
+        
+        const graphData = await buildGalaxyData(tempPath, (current, total) => {
+           if (scanId) scanProgressMap[scanId] = { current, total };
+        });
+
+        upsertProjectToHistory(projectId, 'local', projectName);
+
+        zlib.gzip(JSON.stringify(graphData), (err, buffer) => {
+          res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Encoding': 'gzip' });
+          res.end(buffer);
+        });
+        
+        if (scanId) delete scanProgressMap[scanId];
+
+      } catch (e) {
+        res.writeHead(500); res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+    return;
+  }
+
+  // 🕒 ראוט: שליפת היסטוריית פרויקטים
+  if (req.method === 'GET' && req.url === '/api/history') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify(getHistory()));
+  }
+
+  // 🗑️ ראוט: מחיקת פרויקט מההיסטוריה ומהדיסק
+  if (req.method === 'DELETE' && req.url.startsWith('/api/history/')) {
+    const id = req.url.split('/').pop();
+    let history = getHistory();
+    history = history.filter(p => p.id !== id);
+    saveHistory(history);
+    
+    const projectDir = path.join(process.cwd(), 'data', id);
+    if (fs.existsSync(projectDir)) {
+      fs.rmSync(projectDir, { recursive: true, force: true });
+    }
+    
+    res.writeHead(200); return res.end(JSON.stringify({ success: true }));
+  }
+
+  // ⚡ ראוט: טעינת פרויקט מהיר מהזיכרון
+  if (req.method === 'GET' && req.url.startsWith('/api/load-project/')) {
+    // 🆕 עוטפים את הלוגיקה בפונקציה אסינכרונית שמפעילה את עצמה
+    (async () => {
+      const id = req.url.split('/').pop();
+      const projectPath = path.join(process.cwd(), 'data', id);
+      
+      if (!fs.existsSync(projectPath)) {
+        res.writeHead(404); return res.end(JSON.stringify({ error: 'הפרויקט לא נמצא במערכת.' }));
+      }
+      
+      try {
+        console.log(`⚡ טוען פרויקט קיים מהזיכרון: ${id}`);
+        const graphData = await buildGalaxyData(projectPath); // עכשיו ה-await חוקי לחלוטין!
+        
+        // עדכון זמן הגישה
+        const projectType = id.startsWith('repo_') ? 'github' : 'local';
+        upsertProjectToHistory(id, projectType, id.replace('repo_', '').replace('local_', ''));
+
+        zlib.gzip(JSON.stringify(graphData), (err, buffer) => {
+          res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Encoding': 'gzip' });
+          res.end(buffer);
+        });
+      } catch (e) {
+        res.writeHead(500); res.end(JSON.stringify({ error: e.message }));
+      }
+    })();
+    return;
+  }
+
+  // 📊 ראוט חדש: שליפת התקדמות בזמן אמת מהשרת
+  if (req.method === 'GET' && req.url.startsWith('/api/scan-progress')) {
+    const scanId = req.url.split('?id=')[1];
+    const progress = scanProgressMap[scanId] || { current: 0, total: 0 };
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify(progress));
+  }
+
+  // פתיחת קובץ בעורך הקוד
+  if (req.method === 'POST' && req.url === '/api/open-file') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', () => {
+      try {
+        const { filePath } = JSON.parse(body);
+        const absolutePath = path.resolve(filePath);
+        const cmd = process.platform === 'win32' ? `code "${absolutePath}"` : `code "${absolutePath}"`;
+        exec(cmd, (err) => {
+          if (err) {
+            const fallbackCmd = process.platform === 'win32' ? `start "" "${absolutePath}"` : `open "${absolutePath}"`;
+            exec(fallbackCmd);
+          }
+        });
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true }));
+      } catch (e) {
+        res.writeHead(500); res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+    return;
+  }
+
+  // עדכון ושמירת קובץ בדיסק המקומי
+  if (req.method === 'POST' && req.url === '/api/save-file') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', () => {
+      try {
+        const { filePath, content } = JSON.parse(body);
+        if (!filePath || content === undefined) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ error: 'נתיב או תוכן חסרים' }));
+        }
+        fs.writeFileSync(filePath, content, 'utf-8');
+        console.log(`✅ הקובץ עודכן בהצלחה בדיסק: ${filePath}`);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true }));
+      } catch (err) {
+        console.error("❌ שגיאה בשמירת הקובץ:", err.message);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
+  // 📄 קריאת תוכן קובץ להצגה בעורך הקוד הימני
+  if (req.method === 'POST' && req.url === '/api/file-content') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', () => {
+      try {
+        const { filePath } = JSON.parse(body);
+        if (!fs.existsSync(filePath)) {
+          res.writeHead(404); return res.end(JSON.stringify({ error: 'קובץ לא נמצא' }));
+        }
+        const content = fs.readFileSync(filePath, 'utf-8');
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ content }));
+      } catch (e) {
+        res.writeHead(500); res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+    return;
+  }
+
+  // ⚡ קבלת תיקון נקודתי מה-AI ושמירתו בקובץ (Search & Replace)
+  if (req.method === 'POST' && req.url === '/api/apply-block-change') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', () => {
+      try {
+        const { filePath, searchBlock, replaceBlock } = JSON.parse(body);
+        if (!fs.existsSync(filePath)) {
+          res.writeHead(404); return res.end(JSON.stringify({ error: 'קובץ לא נמצא' }));
+        }
+
+        const originalContent = fs.readFileSync(filePath, 'utf-8');
+
+        // מנגנון חיפוש והחלפה חכם שמתעלם מרווחים מיותרים
+        function applyFuzzyReplace(content, search, replace) {
+          // 1. ניסיון החלפה מדויקת (100% Exact Match)
+          if (content.includes(search)) {
+            return { success: true, newContent: content.replace(search, replace), method: 'exact' };
+          }
+
+          // 2. התאמה גמישה (Fuzzy) אם יש הבדל של רווחים או ירידות שורה
+          const originalLines = content.split(/\r?\n/);
+          const searchLines = search.split(/\r?\n/).filter(line => line.trim() !== '');
+          if (searchLines.length === 0) return { success: false, error: 'בלוק ריק' };
+          
+          const normalize = str => str.replace(/\s+/g, ' ').trim();
+          const normSearch = searchLines.map(normalize);
+          
+          for (let i = 0; i <= originalLines.length - normSearch.length; i++) {
+            let isMatch = true;
+            for (let j = 0; j < normSearch.length; j++) {
+              if (normalize(originalLines[i + j]) !== normSearch[j]) { isMatch = false; break; }
+            }
+            if (isMatch) {
+              const replaceLines = replace.split(/\r?\n/);
+              originalLines.splice(i, normSearch.length, ...replaceLines);
+              return { success: true, newContent: originalLines.join('\n'), method: 'fuzzy' };
+            }
+          }
+          return { success: false, error: 'לא נמצאה התאמה לבלוק הקוד' };
+        }
+
+        const result = applyFuzzyReplace(originalContent, searchBlock, replaceBlock);
+        
+        if (result.success) {
+          fs.writeFileSync(filePath, result.newContent, 'utf-8');
+          console.log(`✅ בוצע תיקון נקודתי בקובץ: ${filePath}`);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true, method: result.method }));
+        } else {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: result.error }));
+        }
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
+  // ⚡ יצירת קובץ חדש (Smart File Splitting)
+  if (req.method === 'POST' && req.url === '/api/create-file') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', () => {
+      try {
+        const { filePath, content } = JSON.parse(body);
+        
+        // יצירת התיקייה במידה והיא לא קיימת
+        const path = require('path');
+        const dir = path.dirname(filePath);
+        if (!fs.existsSync(dir)) {
+          fs.mkdirSync(dir, { recursive: true });
+        }
+        
+        // כתיבת הקובץ החדש
+        fs.writeFileSync(filePath, content, 'utf-8');
+        console.log(`✅ קובץ חדש נוצר בהצלחה: ${filePath}`);
+        
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true }));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
+  // 🤖 ראוט: תקשורת מול ג'מיני (צ'אט)
+  if (req.method === 'POST' && req.url === '/api/chat-stream') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', () => {
+      // מעביר את הבקשה לפונקציה החכמה שיצרנו בקובץ chat.js
+      handleChatStream(req, res, body);
+    });
+    return;
+  }
+
+  res.writeHead(404);
+  res.end();
+});
+
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+  console.log(`🚀 Code-Galaxy 3D AI רץ בהצלחה בכתובת: http://localhost:${PORT}`);
+});
