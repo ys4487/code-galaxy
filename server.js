@@ -60,6 +60,18 @@ const server = http.createServer((req, res) => {
     return res.end(fs.readFileSync(path.join(__dirname, 'public', 'app.js')));
   }
 
+  // 🌟 הגשת האייקונים ותעודת הזהות של האפליקציה (PWA)
+  const urlPath = req.url.split('?')[0]; // מנקה פרמטרים כמו ?v=4 כדי למצוא את הקובץ
+  if (req.method === 'GET' && (urlPath === '/icon.png' || urlPath === '/icon.svg' || urlPath === '/manifest.json')) {
+    const filePath = path.join(__dirname, 'public', urlPath);
+    if (fs.existsSync(filePath)) {
+      const ext = path.extname(filePath);
+      const contentType = ext === '.png' ? 'image/png' : ext === '.svg' ? 'image/svg+xml' : 'application/json';
+      res.writeHead(200, { 'Content-Type': contentType });
+      return res.end(fs.readFileSync(filePath));
+    }
+  }
+
   // 📥 קליטת פרויקט מגיטהאב, ניתוח ומחיקה
   if (req.method === 'POST' && req.url === '/api/analyze-github') {
     let body = '';
