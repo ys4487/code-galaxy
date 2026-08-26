@@ -202,6 +202,57 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // 🚀 קליטת פרויקט מספריית NPM
+  if (req.method === 'POST' && req.url === '/api/analyze-npm') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', async () => {
+      try {
+        const { packageName, scanId } = JSON.parse(body);
+        if (!packageName) return res.writeHead(400).end(JSON.stringify({ error: 'שם חבילה חסר.' }));
+
+        // ניקוי הקידומת 'npm:' כדי לקבל את השם האמיתי
+        const cleanName = packageName.replace(/^npm:/i, '').trim();
+        const projectId = 'npm_' + cleanName.replace(/[^a-zA-Z0-9_-]/g, '_') + '_' + Date.now();
+        const tempPath = path.join(process.cwd(), 'data', projectId);
+        
+        fs.mkdirSync(tempPath, { recursive: true });
+        if (scanId) scanProgressMap[scanId] = { current: 0, total: 1 };
+        console.log(`📥 מתקין חבילת NPM לתצוגה: ${cleanName}`);
+
+        // הורדת החבילה ללא שמירה לפרויקט שלנו הראשי
+        exec(`npm install ${cleanName} --prefix "${tempPath}" --no-save --no-package-lock`, async (error) => {
+          if (error) {
+            console.error(error);
+            res.writeHead(500); return res.end(JSON.stringify({ error: 'שגיאה בהורדת החבילה מ-NPM. ודא שהשם נכון.' }));
+          }
+          
+          // מתמגנטים אך ורק לקוד המקור של החבילה עצמה!
+          const packageCodePath = path.join(tempPath, 'node_modules', cleanName);
+          console.log(`🚀 מנתח חבילת NPM: ${cleanName}`);
+          
+          try {
+            const graphData = await buildGalaxyData(packageCodePath, (current, total) => {
+               if (scanId) scanProgressMap[scanId] = { current, total };
+            });
+
+            upsertProjectToHistory(projectId, 'npm', `NPM: ${cleanName}`, `npm:${cleanName}`);
+            zlib.gzip(JSON.stringify(graphData), (err, buffer) => {
+              res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Encoding': 'gzip' });
+              res.end(buffer);
+            });
+            if (scanId) delete scanProgressMap[scanId];
+          } catch (analyzeErr) {
+            res.writeHead(500); res.end(JSON.stringify({ error: 'שגיאה בניתוח הקוד: ' + analyzeErr.message }));
+          }
+        });
+      } catch (e) {
+        res.writeHead(500); res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+    return;
+  }
+
   // 📂 קליטת פרויקט מקומי (תיקייה), ניתוח ומחיקה
   if (req.method === 'POST' && req.url === '/api/analyze-local-folder') {
     let body = '';
@@ -350,6 +401,28 @@ const server = http.createServer((req, res) => {
         } catch (err) {
             res.writeHead(500); res.end(JSON.stringify({ error: 'שגיאה בשחזור ה-ZIP מהרשת.' }));
         }
+      } else if (projectMeta && projectMeta.type === 'npm' && projectMeta.repoUrl) {
+        // הריפוי העצמי של NPM!
+        console.log(`🦸‍♂️ מפעיל ריפוי עצמי ל-NPM: ${projectMeta.name}`);
+        const cleanName = projectMeta.repoUrl.replace(/^npm:/i, '').trim();
+        fs.mkdirSync(projectPath, { recursive: true });
+        
+        exec(`npm install ${cleanName} --prefix "${projectPath}" --no-save --no-package-lock`, async (error) => {
+          if (error) {
+             res.writeHead(500); return res.end(JSON.stringify({ error: 'שגיאה בשחזור ה-NPM.' }));
+          }
+          try {
+            const packageCodePath = path.join(projectPath, 'node_modules', cleanName);
+            const graphData = await buildGalaxyData(packageCodePath);
+            upsertProjectToHistory(id, 'npm', projectMeta.name, projectMeta.repoUrl); 
+            zlib.gzip(JSON.stringify(graphData), (err, buffer) => {
+              res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Encoding': 'gzip' });
+              res.end(buffer);
+            });
+          } catch (analyzeErr) {
+             res.writeHead(500); res.end(JSON.stringify({ error: 'שגיאה בניתוח השחזור.' }));
+          }
+        });  
       } else {
         // מצב ג': הפרויקט נמחק וזה קוד מקומי מהמחשב שלך (לא נוכל לשחזר לבד)
         res.writeHead(404); res.end(JSON.stringify({ error: 'הפרויקט המקומי נמחק מהשרת. אנא פתח אותו מחדש על ידי גרירת התיקייה.' }));

@@ -68,7 +68,7 @@
 
     async function loadFromGithub() {
       const url = document.getElementById('github-url').value.trim();
-      if (!url) return alert('נא להדביק קישור חוקי');
+      if (!url) return alert('נא להדביק קישור או שם חבילה');
       
       const overlay = document.getElementById('confirm-loading-overlay');
       const confirmStep = document.getElementById('confirm-step');
@@ -78,20 +78,32 @@
       loadingStep.style.display = 'block';
       overlay.style.display = 'flex';
       
-      // 🆕 זיהוי אוטומטי האם זה קישור ל-ZIP או מאגר Git
+      // 🆕 מערכת זיהוי חכמה (Git / ZIP / NPM)
+      const isNpm = url.toLowerCase().startsWith('npm:');
       const isZip = url.toLowerCase().includes('.zip');
-      document.getElementById('loading-message').innerText = isZip ? 'מוריד ומחלץ את קובץ ה-ZIP... ⏳' : 'מוריד את הפרויקט מהרשת... ⏳';
+      
+      let endpoint = '/api/analyze-github';
+      let requestBody = { repoUrl: url };
+      
+      if (isNpm) {
+        endpoint = '/api/analyze-npm';
+        requestBody = { packageName: url };
+        document.getElementById('loading-message').innerText = `שואב את הספרייה מ-NPM... ⏳`;
+      } else if (isZip) {
+        endpoint = '/api/analyze-zip-url';
+        requestBody = { zipUrl: url };
+        document.getElementById('loading-message').innerText = 'מוריד ומחלץ קובץ ZIP... ⏳';
+      } else {
+        document.getElementById('loading-message').innerText = 'מוריד מאגר מהרשת... ⏳';
+      }
+
+      const scanId = 'scan_' + Date.now();
+      requestBody.scanId = scanId;
       
       const progressFill = document.getElementById('progress-bar-fill');
       const progressText = document.getElementById('progress-text');
       progressFill.style.width = '5%';
       progressText.innerText = '5%';
-
-      const scanId = 'scan_url_' + Date.now();
-      
-      // 🆕 ניתוב חכם לראוט הנכון בשרת
-      const endpoint = isZip ? '/api/analyze-zip-url' : '/api/analyze-github';
-      const requestBody = isZip ? { zipUrl: url, scanId: scanId } : { repoUrl: url, scanId: scanId };
 
       const progressInterval = setInterval(async () => {
         try {
