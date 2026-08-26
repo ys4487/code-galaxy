@@ -6,3 +6,4 @@ node_modules/
 
 # התעלם מתיקיית הנתונים והפרויקטים הזמניים
 data/
+firebase-key.json

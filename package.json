@@ -16,6 +16,7 @@
     "@babel/traverse": "^8.0.4",
     "@lancedb/lancedb": "^0.37.1",
     "dotenv": "^17.4.2",
+    "firebase-admin": "^14.3.0",
     "ws": "^8.21.3"
   }
 }
