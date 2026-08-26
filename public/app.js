@@ -68,7 +68,7 @@
 
     async function loadFromGithub() {
       const url = document.getElementById('github-url').value.trim();
-      if (!url) return alert('נא להדביק קישור חוקי לגיטהאב');
+      if (!url) return alert('נא להדביק קישור חוקי למאגר Git');
       
       // 🆕 הפעלת חלונית הטעינה המושקעת שלנו במקום טקסט פשוט
       const overlay = document.getElementById('confirm-loading-overlay');
@@ -79,7 +79,7 @@
       loadingStep.style.display = 'block';
       overlay.style.display = 'flex';
       
-      document.getElementById('loading-message').innerText = 'מוריד את הפרויקט מגיטהאב... ⏳';
+      document.getElementById('loading-message').innerText = 'מוריד את הפרויקט מהרשת... ⏳';
       const progressFill = document.getElementById('progress-bar-fill');
       const progressText = document.getElementById('progress-text');
       progressFill.style.width = '5%';

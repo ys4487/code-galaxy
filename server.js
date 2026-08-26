@@ -102,8 +102,10 @@ const server = http.createServer((req, res) => {
     req.on('end', () => {
       try {
         const { repoUrl, scanId } = JSON.parse(body); // 🆕 קליטת scanId
-        if (!repoUrl || !repoUrl.includes('github.com')) {
-          res.writeHead(400); return res.end(JSON.stringify({ error: 'קישור לא תקין. נדרש קישור לגיטהאב.' }));
+        // 🆕 מאשרים את שלושת הענקים!
+        const isValidRepo = repoUrl.includes('github.com') || repoUrl.includes('gitlab.com') || repoUrl.includes('bitbucket.org');
+        if (!repoUrl || !isValidRepo) {
+          res.writeHead(400); return res.end(JSON.stringify({ error: 'קישור לא תקין. נדרש קישור מ-GitHub, GitLab או Bitbucket.' }));
         }
 
         const repoName = repoUrl.split('/').pop().replace('.git', '');
