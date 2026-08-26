@@ -1011,7 +1011,10 @@
         history.forEach(proj => {
           const date = new Date(proj.lastAccessed);
           const timeString = `${date.getDate()}/${date.getMonth()+1} - ${date.getHours()}:${date.getMinutes().toString().padStart(2, '0')}`;
-          const icon = proj.type === 'github' ? '🌐' : '📁';
+          let icon = '📁'; // ברירת מחדל
+          if (proj.type === 'github') icon = '🌐';
+          if (proj.type === 'zip') icon = '🤐';
+          if (proj.type === 'npm') icon = '📦';
           
           const card = document.createElement('div');
           card.className = 'project-card';
