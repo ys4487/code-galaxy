@@ -11,23 +11,21 @@
     }
 
     function showModal() {
-      // מציג חזרה את חלון הפרויקטים
       document.getElementById('project-modal').style.display = 'flex';
-      // מסתיר את כפתור הצ'אט הגלובלי כדי שלא יפריע
       document.getElementById('global-chat-btn').style.display = 'none';
       
-      // סוגר את חלון הצ'אט המרחף במידה והושאר פתוח!
       const chatWindow = document.getElementById('global-chat-window');
       if (chatWindow) chatWindow.classList.remove('open');
       
-      // סוגר חלוניות צדדיות אם הן נשארו פתוחות
       closeSidebar();
       if (typeof closeEditor === 'function') closeEditor();
 
-      // 🆕 פצצת אטום: מחיקה מוחלטת של הגלקסיה כדי לשחרר 100% מהזיכרון וה-GPU!
       if (Graph) {
         Graph.graphData({ nodes: [], links: [] });
       }
+      
+      // 🆕 התיקון: קריאה מחדש של ההיסטוריה בכל פעם שהחלון נפתח!
+      loadRecentProjects();
     }
 
     async function handleLocalFiles(event) {
@@ -72,29 +70,69 @@
       const url = document.getElementById('github-url').value.trim();
       if (!url) return alert('נא להדביק קישור חוקי לגיטהאב');
       
-      showLoadingStatus('⏳ מוריד ומנתח את הפרויקט מגיטהאב... זה עשוי לקחת קצת זמן 🚀');
+      // 🆕 הפעלת חלונית הטעינה המושקעת שלנו במקום טקסט פשוט
+      const overlay = document.getElementById('confirm-loading-overlay');
+      const confirmStep = document.getElementById('confirm-step');
+      const loadingStep = document.getElementById('loading-step');
       
+      confirmStep.style.display = 'none'; // מדלג על שלב האישור
+      loadingStep.style.display = 'block';
+      overlay.style.display = 'flex';
+      
+      document.getElementById('loading-message').innerText = 'מוריד את הפרויקט מגיטהאב... ⏳';
+      const progressFill = document.getElementById('progress-bar-fill');
+      const progressText = document.getElementById('progress-text');
+      progressFill.style.width = '5%';
+      progressText.innerText = '5%';
+
+      const scanId = 'scan_github_' + Date.now();
+
+      // האזנה להתקדמות מהשרת
+      const progressInterval = setInterval(async () => {
+        try {
+          const progressRes = await fetch(`/api/scan-progress?id=${scanId}`);
+          const progressData = await progressRes.json();
+          
+          if (progressData.total > 0) {
+            const current = progressData.current;
+            const total = progressData.total;
+            const pct = Math.floor((current / total) * 100);
+            
+            progressFill.style.width = `${pct}%`;
+            progressText.innerText = `${pct}%`;
+            document.getElementById('loading-message').innerText = `מנתח קובץ ${current} מתוך ${total}...`;
+          }
+        } catch (e) {}
+      }, 500);
+
       try {
         const res = await fetch('/api/analyze-github', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ repoUrl: url })
+          body: JSON.stringify({ repoUrl: url, scanId: scanId }) // 🆕 שולחים את המזהה
         });
         
         const data = await res.json();
         
+        clearInterval(progressInterval);
+        progressFill.style.width = '100%';
+        progressText.innerText = '100%';
+        
         if (data.error) {
-          alert('❌ שגיאה: ' + data.error);
-          document.getElementById('loading-status').style.display = 'none';
+          setTimeout(() => { alert('❌ שגיאה: ' + data.error); overlay.style.display = 'none'; }, 500);
           return;
         }
         
-        Graph.graphData(data); // טעינת הנתונים החדשים למנוע התלת-ממד
-        hideModal(); // הסתרת חלון הפתיחה
+        setTimeout(() => {
+          Graph.graphData(data);
+          hideModal();
+          overlay.style.display = 'none';
+        }, 800);
         
       } catch (err) {
+        clearInterval(progressInterval);
         alert('❌ שגיאת תקשורת עם השרת');
-        document.getElementById('loading-status').style.display = 'none';
+        overlay.style.display = 'none';
       }
     }
 

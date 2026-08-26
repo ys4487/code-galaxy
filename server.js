@@ -78,17 +78,15 @@ const server = http.createServer((req, res) => {
     req.on('data', chunk => body += chunk);
     req.on('end', () => {
       try {
-        const { repoUrl } = JSON.parse(body);
+        const { repoUrl, scanId } = JSON.parse(body); // 🆕 קליטת scanId
         if (!repoUrl || !repoUrl.includes('github.com')) {
           res.writeHead(400); return res.end(JSON.stringify({ error: 'קישור לא תקין. נדרש קישור לגיטהאב.' }));
         }
 
-        // 🆕 התיקון לגיטהאב: תיקייה קבועה לפי שם הריפו
         const repoName = repoUrl.split('/').pop().replace('.git', '');
         const projectId = 'repo_' + repoName;
         const tempPath = path.join(process.cwd(), 'data', projectId);
 
-        // 🧹 ניקוי שאריות מהעלאות קודמות
         if (fs.existsSync(tempPath)) {
           fs.rmSync(tempPath, { recursive: true, force: true });
         }
@@ -102,12 +100,20 @@ const server = http.createServer((req, res) => {
           
           console.log(`🚀 מנתח את הפרויקט שירד: ${projectId}`);
           try {
-            const graphData = await buildGalaxyData(tempPath);
+            if (scanId) scanProgressMap[scanId] = { current: 0, total: 1 }; // אתחול התקדמות
+            
+            // 🆕 חיבור הדיווח לשרת בדיוק כמו בתיקייה מקומית
+            const graphData = await buildGalaxyData(tempPath, (current, total) => {
+               if (scanId) scanProgressMap[scanId] = { current, total };
+            });
+            
             upsertProjectToHistory(projectId, 'github', repoName);
             zlib.gzip(JSON.stringify(graphData), (err, buffer) => {
               res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Encoding': 'gzip' });
               res.end(buffer);
             });
+            
+            if (scanId) delete scanProgressMap[scanId]; // ניקוי בסיום
           } catch (analyzeErr) {
             res.writeHead(500); res.end(JSON.stringify({ error: 'שגיאה בניתוח הקוד: ' + analyzeErr.message }));
           }
