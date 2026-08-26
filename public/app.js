@@ -68,26 +68,31 @@
 
     async function loadFromGithub() {
       const url = document.getElementById('github-url').value.trim();
-      if (!url) return alert('נא להדביק קישור חוקי למאגר Git');
+      if (!url) return alert('נא להדביק קישור חוקי');
       
-      // 🆕 הפעלת חלונית הטעינה המושקעת שלנו במקום טקסט פשוט
       const overlay = document.getElementById('confirm-loading-overlay');
       const confirmStep = document.getElementById('confirm-step');
       const loadingStep = document.getElementById('loading-step');
       
-      confirmStep.style.display = 'none'; // מדלג על שלב האישור
+      confirmStep.style.display = 'none';
       loadingStep.style.display = 'block';
       overlay.style.display = 'flex';
       
-      document.getElementById('loading-message').innerText = 'מוריד את הפרויקט מהרשת... ⏳';
+      // 🆕 זיהוי אוטומטי האם זה קישור ל-ZIP או מאגר Git
+      const isZip = url.toLowerCase().includes('.zip');
+      document.getElementById('loading-message').innerText = isZip ? 'מוריד ומחלץ את קובץ ה-ZIP... ⏳' : 'מוריד את הפרויקט מהרשת... ⏳';
+      
       const progressFill = document.getElementById('progress-bar-fill');
       const progressText = document.getElementById('progress-text');
       progressFill.style.width = '5%';
       progressText.innerText = '5%';
 
-      const scanId = 'scan_github_' + Date.now();
+      const scanId = 'scan_url_' + Date.now();
+      
+      // 🆕 ניתוב חכם לראוט הנכון בשרת
+      const endpoint = isZip ? '/api/analyze-zip-url' : '/api/analyze-github';
+      const requestBody = isZip ? { zipUrl: url, scanId: scanId } : { repoUrl: url, scanId: scanId };
 
-      // האזנה להתקדמות מהשרת
       const progressInterval = setInterval(async () => {
         try {
           const progressRes = await fetch(`/api/scan-progress?id=${scanId}`);
@@ -97,7 +102,6 @@
             const current = progressData.current;
             const total = progressData.total;
             const pct = Math.floor((current / total) * 100);
-            
             progressFill.style.width = `${pct}%`;
             progressText.innerText = `${pct}%`;
             document.getElementById('loading-message').innerText = `מנתח קובץ ${current} מתוך ${total}...`;
@@ -106,10 +110,10 @@
       }, 500);
 
       try {
-        const res = await fetch('/api/analyze-github', {
+        const res = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ repoUrl: url, scanId: scanId }) // 🆕 שולחים את המזהה
+          body: JSON.stringify(requestBody)
         });
         
         const data = await res.json();

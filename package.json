@@ -15,6 +15,8 @@
     "@babel/parser": "^8.0.4",
     "@babel/traverse": "^8.0.4",
     "@lancedb/lancedb": "^0.37.1",
+    "adm-zip": "^0.6.0",
+    "axios": "^1.20.0",
     "dotenv": "^17.4.2",
     "firebase-admin": "^14.3.0",
     "ws": "^8.21.3"

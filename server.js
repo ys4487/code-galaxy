@@ -5,6 +5,8 @@ const path = require('path');
 const zlib = require('zlib');
 const { exec } = require('child_process');
 const admin = require('firebase-admin'); // 🆕 הוספנו את הספריה של פיירבייס
+const axios = require('axios');
+const AdmZip = require('adm-zip');
 
 // 🆕 אתחול החיבור למסד הנתונים
 let db;
@@ -150,6 +152,56 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // 📦 קליטת פרויקט מקובץ ZIP (קישור ישיר)
+  if (req.method === 'POST' && req.url === '/api/analyze-zip-url') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', async () => {
+      try {
+        const { zipUrl, scanId } = JSON.parse(body);
+        if (!zipUrl) {
+          res.writeHead(400); return res.end(JSON.stringify({ error: 'קישור חסר.' }));
+        }
+
+        const projectId = 'zip_' + Date.now();
+        const tempPath = path.join(process.cwd(), 'data', projectId);
+        const zipFilePath = path.join(process.cwd(), 'data', `${projectId}.zip`);
+
+        if (scanId) scanProgressMap[scanId] = { current: 0, total: 1 };
+        console.log(`📥 מוריד קובץ ZIP: ${zipUrl}`);
+
+        // 1. הורדת הקובץ מהאינטרנט
+        const response = await axios({ url: zipUrl, method: 'GET', responseType: 'arraybuffer' });
+        fs.writeFileSync(zipFilePath, response.data);
+
+        // 2. חילוץ הקובץ (Unzip)
+        console.log(`📦 מחלץ את ה-ZIP...`);
+        const zip = new AdmZip(zipFilePath);
+        zip.extractAllTo(tempPath, true);
+        fs.unlinkSync(zipFilePath); // מחיקת ה-ZIP לאחר החילוץ כדי לחסוך מקום בשרת
+
+        console.log(`🚀 מנתח פרויקט מ-ZIP: ${projectId}`);
+        const graphData = await buildGalaxyData(tempPath, (current, total) => {
+           if (scanId) scanProgressMap[scanId] = { current, total };
+        });
+
+        upsertProjectToHistory(projectId, 'zip', 'פרויקט ZIP', zipUrl);
+
+        zlib.gzip(JSON.stringify(graphData), (err, buffer) => {
+          res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Encoding': 'gzip' });
+          res.end(buffer);
+        });
+        
+        if (scanId) delete scanProgressMap[scanId];
+
+      } catch (e) {
+        console.error(e);
+        res.writeHead(500); res.end(JSON.stringify({ error: 'שגיאה בהורדת ה-ZIP. ודא שזהו קישור ישיר תקין.' }));
+      }
+    });
+    return;
+  }
+
   // 📂 קליטת פרויקט מקומי (תיקייה), ניתוח ומחיקה
   if (req.method === 'POST' && req.url === '/api/analyze-local-folder') {
     let body = '';
@@ -278,6 +330,26 @@ const server = http.createServer((req, res) => {
             res.writeHead(500); res.end(JSON.stringify({ error: 'שגיאה בניתוח הקוד בשחזור.' }));
           }
         });
+      } else if (projectMeta && projectMeta.type === 'zip' && projectMeta.repoUrl) {
+        // הריפוי העצמי של פרויקטי ZIP!
+        console.log(`🦸‍♂️ מפעיל ריפוי עצמי מ-ZIP לפרויקט: ${projectMeta.name}`);
+        const zipFilePath = path.join(process.cwd(), 'data', `${id}.zip`);
+        try {
+            const response = await axios({ url: projectMeta.repoUrl, method: 'GET', responseType: 'arraybuffer' });
+            fs.writeFileSync(zipFilePath, response.data);
+            const zip = new AdmZip(zipFilePath);
+            zip.extractAllTo(projectPath, true);
+            fs.unlinkSync(zipFilePath);
+            
+            const graphData = await buildGalaxyData(projectPath);
+            upsertProjectToHistory(id, 'zip', projectMeta.name, projectMeta.repoUrl); 
+            zlib.gzip(JSON.stringify(graphData), (err, buffer) => {
+              res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Encoding': 'gzip' });
+              res.end(buffer);
+            });
+        } catch (err) {
+            res.writeHead(500); res.end(JSON.stringify({ error: 'שגיאה בשחזור ה-ZIP מהרשת.' }));
+        }
       } else {
         // מצב ג': הפרויקט נמחק וזה קוד מקומי מהמחשב שלך (לא נוכל לשחזר לבד)
         res.writeHead(404); res.end(JSON.stringify({ error: 'הפרויקט המקומי נמחק מהשרת. אנא פתח אותו מחדש על ידי גרירת התיקייה.' }));
