@@ -4,6 +4,20 @@ const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
 const { exec } = require('child_process');
+const admin = require('firebase-admin'); // 🆕 הוספנו את הספריה של פיירבייס
+
+// 🆕 אתחול החיבור למסד הנתונים
+let db;
+try {
+  const serviceAccount = require('./firebase-key.json');
+  admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount)
+  });
+  db = admin.firestore();
+  console.log("🔥 מחובר בהצלחה ל-Firebase Firestore!");
+} catch (error) {
+  console.error("❌ שגיאה בחיבור לפיירבייס (האם קובץ המפתח קיים?):", error.message);
+}
 
 // ייבוא המודולים החדשים שלנו
 const { buildGalaxyData } = require('./src/api/analyzer');
@@ -11,35 +25,44 @@ const { handleChatStream } = require('./src/api/chat');
 // 🆕 מאגר גלובלי לשמירת התקדמות הסריקה
 const scanProgressMap = {};
 
-// --- 🕒 מנגנון היסטוריית פרויקטים ---
-const historyFile = path.join(process.cwd(), 'data', 'history.json');
+// --- 🕒 מנגנון היסטוריית פרויקטים (מחובר ל-Firebase בענן!) ---
 
-function getHistory() {
-  if (!fs.existsSync(historyFile)) return [];
-  try { return JSON.parse(fs.readFileSync(historyFile, 'utf-8')); } catch(e) { return []; }
-}
-
-function saveHistory(history) {
-  const dir = path.dirname(historyFile);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(historyFile, JSON.stringify(history, null, 2));
-}
-
-function upsertProjectToHistory(id, type, name) {
-  let history = getHistory();
-  const existingIndex = history.findIndex(p => p.id === id);
-  const now = new Date().toISOString();
-  
-  if (existingIndex >= 0) {
-    history[existingIndex].lastAccessed = now;
-    const [item] = history.splice(existingIndex, 1); // שולף אותו
-    history.unshift(item); // ודוחף אותו לראש הרשימה
-  } else {
-    history.unshift({ id, type, name, lastAccessed: now });
+async function getHistory() {
+  if (!db) return [];
+  try {
+    // שולף מהענן את 10 הפרויקטים האחרונים מסודרים לפי תאריך
+    const snapshot = await db.collection('history').orderBy('lastAccessed', 'desc').limit(10).get();
+    const history = [];
+    snapshot.forEach(doc => history.push(doc.data()));
+    return history;
+  } catch (e) {
+    console.error("Error getting history:", e);
+    return [];
   }
-  
-  history = history.slice(0, 10); // שומר רק את ה-10 האחרונים כדי לא להעמיס
-  saveHistory(history);
+}
+
+async function upsertProjectToHistory(id, type, name, repoUrl = null) {
+  if (!db) return;
+  try {
+    const now = new Date().toISOString();
+    const data = { id, type, name, lastAccessed: now };
+    // 🆕 אם קיבלנו קישור לגיטהאב, נוסיף אותו למידע שנשמר בענן
+    if (repoUrl) {
+      data.repoUrl = repoUrl;
+    }
+    await db.collection('history').doc(id).set(data);
+  } catch (e) {
+    console.error("Error saving history:", e);
+  }
+}
+
+async function deleteProjectFromHistory(id) {
+  if (!db) return;
+  try {
+    await db.collection('history').doc(id).delete();
+  } catch (e) {
+    console.error("Error deleting history:", e);
+  }
 }
 
 const server = http.createServer((req, res) => {
@@ -107,7 +130,7 @@ const server = http.createServer((req, res) => {
                if (scanId) scanProgressMap[scanId] = { current, total };
             });
             
-            upsertProjectToHistory(projectId, 'github', repoName);
+            upsertProjectToHistory(projectId, 'github', repoName, repoUrl);
             zlib.gzip(JSON.stringify(graphData), (err, buffer) => {
               res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Encoding': 'gzip' });
               res.end(buffer);
@@ -177,52 +200,85 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // 🕒 ראוט: שליפת היסטוריית פרויקטים
+  // 🕒 ראוט: שליפת היסטוריית פרויקטים (מהענן)
   if (req.method === 'GET' && req.url === '/api/history') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    return res.end(JSON.stringify(getHistory()));
+    (async () => {
+      const history = await getHistory();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(history));
+    })();
+    return;
   }
 
-  // 🗑️ ראוט: מחיקת פרויקט מההיסטוריה ומהדיסק
+  // 🗑️ ראוט: מחיקת פרויקט מההיסטוריה (מהענן) ומהדיסק
   if (req.method === 'DELETE' && req.url.startsWith('/api/history/')) {
-    const id = req.url.split('/').pop();
-    let history = getHistory();
-    history = history.filter(p => p.id !== id);
-    saveHistory(history);
-    
-    const projectDir = path.join(process.cwd(), 'data', id);
-    if (fs.existsSync(projectDir)) {
-      fs.rmSync(projectDir, { recursive: true, force: true });
-    }
-    
-    res.writeHead(200); return res.end(JSON.stringify({ success: true }));
+    (async () => {
+      const id = req.url.split('/').pop();
+      await deleteProjectFromHistory(id);
+      
+      const projectDir = path.join(process.cwd(), 'data', id);
+      if (fs.existsSync(projectDir)) {
+        fs.rmSync(projectDir, { recursive: true, force: true });
+      }
+      
+      res.writeHead(200); res.end(JSON.stringify({ success: true }));
+    })();
+    return;
   }
 
-  // ⚡ ראוט: טעינת פרויקט מהיר מהזיכרון
+  // ⚡ ראוט: טעינת פרויקט מהיר מהזיכרון (או ריפוי עצמי מגיטהאב!)
   if (req.method === 'GET' && req.url.startsWith('/api/load-project/')) {
-    // 🆕 עוטפים את הלוגיקה בפונקציה אסינכרונית שמפעילה את עצמה
     (async () => {
       const id = req.url.split('/').pop();
       const projectPath = path.join(process.cwd(), 'data', id);
       
-      if (!fs.existsSync(projectPath)) {
-        res.writeHead(404); return res.end(JSON.stringify({ error: 'הפרויקט לא נמצא במערכת.' }));
-      }
-      
-      try {
-        console.log(`⚡ טוען פרויקט קיים מהזיכרון: ${id}`);
-        const graphData = await buildGalaxyData(projectPath); // עכשיו ה-await חוקי לחלוטין!
-        
-        // עדכון זמן הגישה
-        const projectType = id.startsWith('repo_') ? 'github' : 'local';
-        upsertProjectToHistory(id, projectType, id.replace('repo_', '').replace('local_', ''));
+      // מצב א': הקבצים נמצאים בשרת (Render עוד לא מחק אותם) - טעינה מהירה
+      if (fs.existsSync(projectPath)) {
+        try {
+          console.log(`⚡ טוען פרויקט קיים מהזיכרון: ${id}`);
+          const graphData = await buildGalaxyData(projectPath);
+          
+          const history = await getHistory();
+          const proj = history.find(p => p.id === id);
+          upsertProjectToHistory(id, proj ? proj.type : 'local', proj ? proj.name : id, proj ? proj.repoUrl : null);
 
-        zlib.gzip(JSON.stringify(graphData), (err, buffer) => {
-          res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Encoding': 'gzip' });
-          res.end(buffer);
+          zlib.gzip(JSON.stringify(graphData), (err, buffer) => {
+            res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Encoding': 'gzip' });
+            res.end(buffer);
+          });
+        } catch (e) {
+          res.writeHead(500); res.end(JSON.stringify({ error: e.message }));
+        }
+        return; // סיימנו בהצלחה
+      }
+
+      // מצב ב': התיקייה נמחקה! 🦸‍♂️ מפעילים ריפוי עצמי מהענן!
+      const history = await getHistory();
+      const projectMeta = history.find(p => p.id === id);
+
+      // בודקים אם זה פרויקט גיטהאב ויש לנו את הקישור שלו שמור בפיירבייס
+      if (projectMeta && projectMeta.type === 'github' && projectMeta.repoUrl) {
+        console.log(`🦸‍♂️ מפעיל ריפוי עצמי (שחזור אוטומטי מגיטהאב) לפרויקט: ${projectMeta.name}`);
+        
+        exec(`git clone --depth 1 ${projectMeta.repoUrl} ${projectPath}`, async (error) => {
+          if (error) {
+            res.writeHead(500); return res.end(JSON.stringify({ error: 'שגיאה בשחזור הפרויקט מגיטהאב.' }));
+          }
+          try {
+            const graphData = await buildGalaxyData(projectPath);
+            upsertProjectToHistory(id, 'github', projectMeta.name, projectMeta.repoUrl); // מעדכנים תאריך
+            
+            zlib.gzip(JSON.stringify(graphData), (err, buffer) => {
+              res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Encoding': 'gzip' });
+              res.end(buffer);
+            });
+          } catch (analyzeErr) {
+            res.writeHead(500); res.end(JSON.stringify({ error: 'שגיאה בניתוח הקוד בשחזור.' }));
+          }
         });
-      } catch (e) {
-        res.writeHead(500); res.end(JSON.stringify({ error: e.message }));
+      } else {
+        // מצב ג': הפרויקט נמחק וזה קוד מקומי מהמחשב שלך (לא נוכל לשחזר לבד)
+        res.writeHead(404); res.end(JSON.stringify({ error: 'הפרויקט המקומי נמחק מהשרת. אנא פתח אותו מחדש על ידי גרירת התיקייה.' }));
       }
     })();
     return;
