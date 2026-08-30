@@ -4,21 +4,22 @@ const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
 const { exec } = require('child_process');
-const admin = require('firebase-admin'); // 🆕 הוספנו את הספריה של פיירבייס
 const axios = require('axios');
 const AdmZip = require('adm-zip');
+const { initializeApp, cert } = require('firebase-admin/app');
+const { getFirestore } = require('firebase-admin/firestore');
 
-// 🆕 אתחול החיבור למסד הנתונים
+// 🆕 אתחול החיבור למסד הנתונים (תחביר מודרני)
 let db;
 try {
   const serviceAccount = require('./firebase-key.json');
-  admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount)
+  initializeApp({
+    credential: cert(serviceAccount)
   });
-  db = admin.firestore();
+  db = getFirestore();
   console.log("🔥 מחובר בהצלחה ל-Firebase Firestore!");
 } catch (error) {
-  console.error("❌ שגיאה בחיבור לפיירבייס (האם קובץ המפתח קיים?):", error.message);
+  console.error("❌ שגיאה בחיבור לפיירבייס:", error.message);
 }
 
 // ייבוא המודולים החדשים שלנו
