@@ -214,7 +214,7 @@ const server = http.createServer((req, res) => {
 
         // ניקוי הקידומת 'npm:' כדי לקבל את השם האמיתי
         const cleanName = packageName.replace(/^npm:/i, '').trim();
-        const projectId = 'npm_' + cleanName.replace(/[^a-zA-Z0-9_-]/g, '_') + '_' + Date.now();
+        const projectId = 'npm_' + cleanName.replace(/[^a-zA-Z0-9_-]/g, '_');
         const tempPath = path.join(process.cwd(), 'data', projectId);
         
         fs.mkdirSync(tempPath, { recursive: true });

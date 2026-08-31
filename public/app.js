@@ -994,7 +994,7 @@
     // --- 🕒 מנגנון היסטוריית פרויקטים ---
     async function loadRecentProjects() {
       try {
-        const res = await fetch('/api/history');
+        const res = await fetch('/api/history', { cache: 'no-store' });
         const history = await res.json();
         
         const section = document.getElementById('recent-projects-section');
