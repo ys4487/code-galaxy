@@ -9,10 +9,18 @@ const AdmZip = require('adm-zip');
 const { initializeApp, cert } = require('firebase-admin/app');
 const { getFirestore } = require('firebase-admin/firestore');
 
-// 🆕 אתחול החיבור למסד הנתונים (תחביר מודרני)
+// 🆕 אתחול החיבור למסד הנתונים (תמיכה ב-Render ובמחשב מקומי)
 let db;
 try {
-  const serviceAccount = require('./firebase-key.json');
+  let serviceAccount;
+  if (process.env.FIREBASE_KEY) {
+    // קריאה מאובטחת מהענן של Render
+    serviceAccount = JSON.parse(process.env.FIREBASE_KEY);
+  } else {
+    // קריאה מקומית כשהשרת רץ על המחשב שלך
+    serviceAccount = require('./firebase-key.json');
+  }
+
   initializeApp({
     credential: cert(serviceAccount)
   });
