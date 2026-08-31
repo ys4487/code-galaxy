@@ -1,3 +1,10 @@
+// 🆕 אתחול תעודת זהות פרטית למשתמש
+let userId = localStorage.getItem('galaxy_user_id');
+if (!userId) {
+  userId = 'user_' + Math.random().toString(36).substring(2, 11);
+  localStorage.setItem('galaxy_user_id', userId);
+}
+
 // --- 🚀 ניהול חלון הפתיחה וטעינת פרויקטים ---
     function showLoadingStatus(text) {
       const statusDiv = document.getElementById('loading-status');
@@ -124,7 +131,7 @@
       try {
         const res = await fetch(endpoint, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'x-user-id': userId },
           body: JSON.stringify(requestBody)
         });
         
@@ -234,7 +241,7 @@
     async function loadGalaxy() {
       const res = await fetch('/api/galaxy', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'x-user-id': userId },
         body: JSON.stringify({}) 
       });
       const data = await res.json();
@@ -263,7 +270,7 @@
       if (!currentSelectedFile) return;
       await fetch('/api/open-file', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'x-user-id': userId },
         body: JSON.stringify({ filePath: currentSelectedFile })
       });
     }
@@ -358,7 +365,7 @@
       try {
         const res = await fetch('/api/save-file', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'x-user-id': userId },
           body: JSON.stringify({ filePath: currentSelectedFile, content: newCode })
         });
 
@@ -381,7 +388,7 @@
       try {
         const res = await fetch('/api/apply-block-change', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'x-user-id': userId },
           body: JSON.stringify({
             filePath: currentSelectedFile,
             searchBlock,
@@ -505,7 +512,7 @@
       try {
         const res = await fetch('/api/file-content', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'x-user-id': userId },
           body: JSON.stringify({ filePath })
         });
         const data = await res.json();
@@ -664,7 +671,7 @@
       try {
         const response = await fetch('/api/chat-stream', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'x-user-id': userId },
           // 🧠 השטיק האמיתי: שיגור הנתיב אם נבחר קובץ, או null אם אנחנו במצב גלובלי
           body: JSON.stringify({ filePath: currentSelectedFile || 'null', question }) 
         });
@@ -807,7 +814,7 @@
          // פעולה 1: מחיקת הקוד מהקובץ הישן (דרך ה-API הקיים שלנו)
          await fetch('/api/apply-block-change', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'x-user-id': userId },
             body: JSON.stringify({ filePath: oldFilePath, searchStr, replaceStr })
          });
 
@@ -818,7 +825,7 @@
          // פעולה 2: יצירת הקובץ החדש
          await fetch('/api/create-file', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'x-user-id': userId },
             body: JSON.stringify({ filePath: fullNewFilePath, content: newContent })
          });
 
@@ -958,7 +965,7 @@
         try {
           const res = await fetch('/api/analyze-local-folder', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'x-user-id': userId },
             // 🆕 שליחת המזהה לשרת ביחד עם הקבצים
             body: JSON.stringify({ files: filesToSend, scanId: scanId })
           });
@@ -994,7 +1001,7 @@
     // --- 🕒 מנגנון היסטוריית פרויקטים ---
     async function loadRecentProjects() {
       try {
-        const res = await fetch('/api/history', { cache: 'no-store' });
+        const res = await fetch('/api/history', { headers: { 'x-user-id': userId }, cache: 'no-store' });
         const history = await res.json();
         
         const section = document.getElementById('recent-projects-section');
@@ -1036,7 +1043,7 @@
       event.stopPropagation(); // מונע מלחיצה על הפח להפעיל גם את פתיחת הפרויקט!
       if (!confirm('האם אתה בטוח שברצונך למחוק פרויקט זה מהזיכרון? (זה יפנה מקום בשרת)')) return;
       
-      await fetch(`/api/history/${id}`, { method: 'DELETE' });
+      await fetch(`/api/history/${id}`, { method: 'DELETE', headers: { 'x-user-id': userId } });
       loadRecentProjects(); // רענון מהיר של הרשימה
     }
 
@@ -1055,7 +1062,7 @@
       document.getElementById('progress-text').innerText = '🚀';
 
       try {
-        const res = await fetch(`/api/load-project/${id}`);
+        const res = await fetch(`/api/load-project/${id}`, { headers: { 'x-user-id': userId } });
         if (!res.ok) throw new Error('הפרויקט לא נמצא. ייתכן שנמחק ידנית.');
         
         const data = await res.json();

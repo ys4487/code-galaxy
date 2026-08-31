@@ -38,11 +38,10 @@ const scanProgressMap = {};
 
 // --- 🕒 מנגנון היסטוריית פרויקטים (מחובר ל-Firebase בענן!) ---
 
-async function getHistory() {
-  if (!db) return [];
+async function getHistory(userId) {
+  if (!db || !userId) return [];
   try {
-    // שולף מהענן את 10 הפרויקטים האחרונים מסודרים לפי תאריך
-    const snapshot = await db.collection('history').orderBy('lastAccessed', 'desc').limit(10).get();
+    const snapshot = await db.collection('users').doc(userId).collection('history').orderBy('lastAccessed', 'desc').limit(10).get();
     const history = [];
     snapshot.forEach(doc => history.push(doc.data()));
     return history;
@@ -52,31 +51,29 @@ async function getHistory() {
   }
 }
 
-async function upsertProjectToHistory(id, type, name, repoUrl = null) {
-  if (!db) return;
+async function upsertProjectToHistory(userId, id, type, name, repoUrl = null) {
+  if (!db || !userId) return;
   try {
     const now = new Date().toISOString();
     const data = { id, type, name, lastAccessed: now };
-    // 🆕 אם קיבלנו קישור לגיטהאב, נוסיף אותו למידע שנשמר בענן
-    if (repoUrl) {
-      data.repoUrl = repoUrl;
-    }
-    await db.collection('history').doc(id).set(data);
+    if (repoUrl) data.repoUrl = repoUrl;
+    await db.collection('users').doc(userId).collection('history').doc(id).set(data);
   } catch (e) {
     console.error("Error saving history:", e);
   }
 }
 
-async function deleteProjectFromHistory(id) {
-  if (!db) return;
+async function deleteProjectFromHistory(userId, id) {
+  if (!db || !userId) return;
   try {
-    await db.collection('history').doc(id).delete();
+    await db.collection('users').doc(userId).collection('history').doc(id).delete();
   } catch (e) {
     console.error("Error deleting history:", e);
   }
 }
 
 const server = http.createServer((req, res) => {
+  const userId = req.headers['x-user-id'];
   // 1. הגשת קבצים סטאטיים (HTML, CSS, JS)
   if (req.method === 'GET' && (req.url === '/' || req.url === '/index.html')) {
     const html = fs.readFileSync(path.join(__dirname, 'public', 'index.html'));
@@ -143,7 +140,7 @@ const server = http.createServer((req, res) => {
                if (scanId) scanProgressMap[scanId] = { current, total };
             });
             
-            upsertProjectToHistory(projectId, 'github', repoName, repoUrl);
+            upsertProjectToHistory(userId, projectId, 'github', repoName, repoUrl);
             zlib.gzip(JSON.stringify(graphData), (err, buffer) => {
               res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Encoding': 'gzip' });
               res.end(buffer);
@@ -194,7 +191,7 @@ const server = http.createServer((req, res) => {
            if (scanId) scanProgressMap[scanId] = { current, total };
         });
 
-        upsertProjectToHistory(projectId, 'zip', 'פרויקט ZIP', zipUrl);
+        upsertProjectToHistory(userId, projectId, 'zip', 'פרויקט ZIP', zipUrl);
 
         zlib.gzip(JSON.stringify(graphData), (err, buffer) => {
           res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Encoding': 'gzip' });
@@ -245,7 +242,7 @@ const server = http.createServer((req, res) => {
                if (scanId) scanProgressMap[scanId] = { current, total };
             });
 
-            upsertProjectToHistory(projectId, 'npm', `NPM: ${cleanName}`, `npm:${cleanName}`);
+            upsertProjectToHistory(userId, projectId, 'npm', `NPM: ${cleanName}`, `npm:${cleanName}`);
             zlib.gzip(JSON.stringify(graphData), (err, buffer) => {
               res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Encoding': 'gzip' });
               res.end(buffer);
@@ -298,7 +295,7 @@ const server = http.createServer((req, res) => {
            if (scanId) scanProgressMap[scanId] = { current, total };
         });
 
-        upsertProjectToHistory(projectId, 'local', projectName);
+        upsertProjectToHistory(userId, projectId, 'local', projectName);
 
         zlib.gzip(JSON.stringify(graphData), (err, buffer) => {
           res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Encoding': 'gzip' });
@@ -317,7 +314,7 @@ const server = http.createServer((req, res) => {
   // 🕒 ראוט: שליפת היסטוריית פרויקטים (מהענן)
   if (req.method === 'GET' && req.url === '/api/history') {
     (async () => {
-      const history = await getHistory();
+      const history = await getHistory(userId);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(history));
     })();
@@ -328,7 +325,7 @@ const server = http.createServer((req, res) => {
   if (req.method === 'DELETE' && req.url.startsWith('/api/history/')) {
     (async () => {
       const id = req.url.split('/').pop();
-      await deleteProjectFromHistory(id);
+      await deleteProjectFromHistory(userId, id)
       
       const projectDir = path.join(process.cwd(), 'data', id);
       if (fs.existsSync(projectDir)) {
@@ -352,9 +349,9 @@ const server = http.createServer((req, res) => {
           console.log(`⚡ טוען פרויקט קיים מהזיכרון: ${id}`);
           const graphData = await buildGalaxyData(projectPath);
           
-          const history = await getHistory();
+          const history = await getHistory(userId);
           const proj = history.find(p => p.id === id);
-          upsertProjectToHistory(id, proj ? proj.type : 'local', proj ? proj.name : id, proj ? proj.repoUrl : null);
+          upsertProjectToHistory(userId, id, proj ? proj.type : 'local', proj ? proj.name : id, proj ? proj.repoUrl : null);
 
           zlib.gzip(JSON.stringify(graphData), (err, buffer) => {
             res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Encoding': 'gzip' });
@@ -367,7 +364,7 @@ const server = http.createServer((req, res) => {
       }
 
       // מצב ב': התיקייה נמחקה! 🦸‍♂️ מפעילים ריפוי עצמי מהענן!
-      const history = await getHistory();
+      const history = await getHistory(userId);
       const projectMeta = history.find(p => p.id === id);
 
       // בודקים אם זה פרויקט גיטהאב ויש לנו את הקישור שלו שמור בפיירבייס
@@ -380,7 +377,7 @@ const server = http.createServer((req, res) => {
           }
           try {
             const graphData = await buildGalaxyData(projectPath);
-            upsertProjectToHistory(id, 'github', projectMeta.name, projectMeta.repoUrl); // מעדכנים תאריך
+            upsertProjectToHistory(userId, id, 'github', projectMeta.name, projectMeta.repoUrl); // מעדכנים תאריך
             
             zlib.gzip(JSON.stringify(graphData), (err, buffer) => {
               res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Encoding': 'gzip' });
@@ -402,7 +399,7 @@ const server = http.createServer((req, res) => {
             fs.unlinkSync(zipFilePath);
             
             const graphData = await buildGalaxyData(projectPath);
-            upsertProjectToHistory(id, 'zip', projectMeta.name, projectMeta.repoUrl); 
+            upsertProjectToHistory(userId, id, 'zip', projectMeta.name, projectMeta.repoUrl); 
             zlib.gzip(JSON.stringify(graphData), (err, buffer) => {
               res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Encoding': 'gzip' });
               res.end(buffer);
@@ -423,7 +420,7 @@ const server = http.createServer((req, res) => {
           try {
             const packageCodePath = path.join(projectPath, 'node_modules', cleanName);
             const graphData = await buildGalaxyData(packageCodePath);
-            upsertProjectToHistory(id, 'npm', projectMeta.name, projectMeta.repoUrl); 
+            upsertProjectToHistory(userId, id, 'npm', projectMeta.name, projectMeta.repoUrl); 
             zlib.gzip(JSON.stringify(graphData), (err, buffer) => {
               res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Encoding': 'gzip' });
               res.end(buffer);
