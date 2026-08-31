@@ -347,10 +347,21 @@ const server = http.createServer((req, res) => {
       if (fs.existsSync(projectPath)) {
         try {
           console.log(`⚡ טוען פרויקט קיים מהזיכרון: ${id}`);
-          const graphData = await buildGalaxyData(projectPath);
           
+          // 1. קודם שולפים את נתוני הפרויקט מההיסטוריה
           const history = await getHistory(userId);
           const proj = history.find(p => p.id === id);
+          
+          // 2. 🆕 התיקון הקריטי: אם זה NPM, הנתיב האמיתי נמצא בתוך node_modules!
+          let targetPath = projectPath;
+          if (proj && proj.type === 'npm' && proj.repoUrl) {
+            const cleanName = proj.repoUrl.replace(/^npm:/i, '').trim();
+            targetPath = path.join(projectPath, 'node_modules', cleanName);
+          }
+          
+          // 3. סורקים את הנתיב המדויק
+          const graphData = await buildGalaxyData(targetPath);
+          
           upsertProjectToHistory(userId, id, proj ? proj.type : 'local', proj ? proj.name : id, proj ? proj.repoUrl : null);
 
           zlib.gzip(JSON.stringify(graphData), (err, buffer) => {
