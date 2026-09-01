@@ -340,66 +340,73 @@ const server = http.createServer((req, res) => {
   // ⚡ ראוט: טעינת פרויקט מהיר מהזיכרון (או ריפוי עצמי מגיטהאב!)
   if (req.method === 'GET' && req.url.startsWith('/api/load-project/')) {
     (async () => {
-      const id = req.url.split('/').pop();
+      // חילוץ מזהה הפרויקט ומזהה הסריקה (scanId) מתוך הקישור
+      const [pathPart, queryPart] = req.url.split('?');
+      const id = pathPart.split('/').pop();
+      const scanId = queryPart && queryPart.includes('scanId=') ? queryPart.split('scanId=')[1] : null;
+      
       const projectPath = path.join(process.cwd(), 'data', id);
       
+      // אתחול דיווח ההתקדמות
+      if (scanId) scanProgressMap[scanId] = { current: 0, total: 1 };
+      const reportProgress = (current, total) => {
+         if (scanId) scanProgressMap[scanId] = { current, total };
+      };
+
       // מצב א': הקבצים נמצאים בשרת (Render עוד לא מחק אותם) - טעינה מהירה
       if (fs.existsSync(projectPath)) {
         try {
           console.log(`⚡ טוען פרויקט קיים מהזיכרון: ${id}`);
-          
-          // 1. קודם שולפים את נתוני הפרויקט מההיסטוריה
           const history = await getHistory(userId);
           const proj = history.find(p => p.id === id);
           
-          // 2. 🆕 התיקון הקריטי: אם זה NPM, הנתיב האמיתי נמצא בתוך node_modules!
           let targetPath = projectPath;
           if (proj && proj.type === 'npm' && proj.repoUrl) {
             const cleanName = proj.repoUrl.replace(/^npm:/i, '').trim();
             targetPath = path.join(projectPath, 'node_modules', cleanName);
           }
           
-          // 3. סורקים את הנתיב המדויק
-          const graphData = await buildGalaxyData(targetPath);
-          
+          const graphData = await buildGalaxyData(targetPath, reportProgress);
           upsertProjectToHistory(userId, id, proj ? proj.type : 'local', proj ? proj.name : id, proj ? proj.repoUrl : null);
 
           zlib.gzip(JSON.stringify(graphData), (err, buffer) => {
             res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Encoding': 'gzip' });
             res.end(buffer);
+            if (scanId) delete scanProgressMap[scanId];
           });
         } catch (e) {
           res.writeHead(500); res.end(JSON.stringify({ error: e.message }));
+          if (scanId) delete scanProgressMap[scanId];
         }
-        return; // סיימנו בהצלחה
+        return; 
       }
 
       // מצב ב': התיקייה נמחקה! 🦸‍♂️ מפעילים ריפוי עצמי מהענן!
       const history = await getHistory(userId);
       const projectMeta = history.find(p => p.id === id);
 
-      // בודקים אם זה פרויקט גיטהאב ויש לנו את הקישור שלו שמור בפיירבייס
       if (projectMeta && projectMeta.type === 'github' && projectMeta.repoUrl) {
-        console.log(`🦸‍♂️ מפעיל ריפוי עצמי (שחזור אוטומטי מגיטהאב) לפרויקט: ${projectMeta.name}`);
-        
+        console.log(`🦸‍♂️ מפעיל ריפוי עצמי מגיטהאב לפרויקט: ${projectMeta.name}`);
         exec(`git clone --depth 1 ${projectMeta.repoUrl} ${projectPath}`, async (error) => {
           if (error) {
-            res.writeHead(500); return res.end(JSON.stringify({ error: 'שגיאה בשחזור הפרויקט מגיטהאב.' }));
+            res.writeHead(500); res.end(JSON.stringify({ error: 'שגיאה בשחזור מגיטהאב.' }));
+            if (scanId) delete scanProgressMap[scanId];
+            return;
           }
           try {
-            const graphData = await buildGalaxyData(projectPath);
-            upsertProjectToHistory(userId, id, 'github', projectMeta.name, projectMeta.repoUrl); // מעדכנים תאריך
-            
+            const graphData = await buildGalaxyData(projectPath, reportProgress);
+            upsertProjectToHistory(userId, id, 'github', projectMeta.name, projectMeta.repoUrl);
             zlib.gzip(JSON.stringify(graphData), (err, buffer) => {
               res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Encoding': 'gzip' });
               res.end(buffer);
+              if (scanId) delete scanProgressMap[scanId];
             });
           } catch (analyzeErr) {
             res.writeHead(500); res.end(JSON.stringify({ error: 'שגיאה בניתוח הקוד בשחזור.' }));
+            if (scanId) delete scanProgressMap[scanId];
           }
         });
       } else if (projectMeta && projectMeta.type === 'zip' && projectMeta.repoUrl) {
-        // הריפוי העצמי של פרויקטי ZIP!
         console.log(`🦸‍♂️ מפעיל ריפוי עצמי מ-ZIP לפרויקט: ${projectMeta.name}`);
         const zipFilePath = path.join(process.cwd(), 'data', `${id}.zip`);
         try {
@@ -409,40 +416,45 @@ const server = http.createServer((req, res) => {
             zip.extractAllTo(projectPath, true);
             fs.unlinkSync(zipFilePath);
             
-            const graphData = await buildGalaxyData(projectPath);
+            const graphData = await buildGalaxyData(projectPath, reportProgress);
             upsertProjectToHistory(userId, id, 'zip', projectMeta.name, projectMeta.repoUrl); 
             zlib.gzip(JSON.stringify(graphData), (err, buffer) => {
               res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Encoding': 'gzip' });
               res.end(buffer);
+              if (scanId) delete scanProgressMap[scanId];
             });
         } catch (err) {
             res.writeHead(500); res.end(JSON.stringify({ error: 'שגיאה בשחזור ה-ZIP מהרשת.' }));
+            if (scanId) delete scanProgressMap[scanId];
         }
       } else if (projectMeta && projectMeta.type === 'npm' && projectMeta.repoUrl) {
-        // הריפוי העצמי של NPM!
         console.log(`🦸‍♂️ מפעיל ריפוי עצמי ל-NPM: ${projectMeta.name}`);
         const cleanName = projectMeta.repoUrl.replace(/^npm:/i, '').trim();
         fs.mkdirSync(projectPath, { recursive: true });
         
         exec(`npm install ${cleanName} --prefix "${projectPath}" --no-save --no-package-lock`, async (error) => {
           if (error) {
-             res.writeHead(500); return res.end(JSON.stringify({ error: 'שגיאה בשחזור ה-NPM.' }));
+             res.writeHead(500); res.end(JSON.stringify({ error: 'שגיאה בשחזור ה-NPM.' }));
+             if (scanId) delete scanProgressMap[scanId];
+             return;
           }
           try {
             const packageCodePath = path.join(projectPath, 'node_modules', cleanName);
-            const graphData = await buildGalaxyData(packageCodePath);
+            const graphData = await buildGalaxyData(packageCodePath, reportProgress);
             upsertProjectToHistory(userId, id, 'npm', projectMeta.name, projectMeta.repoUrl); 
             zlib.gzip(JSON.stringify(graphData), (err, buffer) => {
               res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Encoding': 'gzip' });
               res.end(buffer);
+              if (scanId) delete scanProgressMap[scanId];
             });
           } catch (analyzeErr) {
              res.writeHead(500); res.end(JSON.stringify({ error: 'שגיאה בניתוח השחזור.' }));
+             if (scanId) delete scanProgressMap[scanId];
           }
         });  
       } else {
-        // מצב ג': הפרויקט נמחק וזה קוד מקומי מהמחשב שלך (לא נוכל לשחזר לבד)
         res.writeHead(404); res.end(JSON.stringify({ error: 'הפרויקט המקומי נמחק מהשרת. אנא פתח אותו מחדש על ידי גרירת התיקייה.' }));
+        if (scanId) delete scanProgressMap[scanId];
       }
     })();
     return;

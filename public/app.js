@@ -1052,27 +1052,53 @@ if (!userId) {
       const confirmStep = document.getElementById('confirm-step');
       const loadingStep = document.getElementById('loading-step');
       
-      // מדלג על בקשת האישור וישר מציג טעינה מהירה
       confirmStep.style.display = 'none';
       loadingStep.style.display = 'block';
       overlay.style.display = 'flex';
       
-      document.getElementById('loading-message').innerText = 'שולף את הגלקסיה מהזיכרון... ✨';
-      document.getElementById('progress-bar-fill').style.width = '100%';
-      document.getElementById('progress-text').innerText = '🚀';
+      document.getElementById('loading-message').innerText = 'שולף נתונים מהזיכרון... ✨';
+      
+      const progressFill = document.getElementById('progress-bar-fill');
+      const progressText = document.getElementById('progress-text');
+      progressFill.style.width = '5%';
+      progressText.innerText = '5%';
+
+      const scanId = 'scan_' + Date.now();
+      
+      const progressInterval = setInterval(async () => {
+        try {
+          const progressRes = await fetch(`/api/scan-progress?id=${scanId}`);
+          const progressData = await progressRes.json();
+          
+          if (progressData.total > 0) {
+            const current = progressData.current;
+            const total = progressData.total;
+            const pct = Math.floor((current / total) * 100);
+            progressFill.style.width = `${pct}%`;
+            progressText.innerText = `${pct}%`;
+            document.getElementById('loading-message').innerText = `טוען ומייצר וקטורים: ${current} מתוך ${total}...`;
+          }
+        } catch (e) {}
+      }, 500);
 
       try {
-        const res = await fetch(`/api/load-project/${id}`, { headers: { 'x-user-id': userId } });
+        // מצרפים את ה-scanId לכתובת הבקשה
+        const res = await fetch(`/api/load-project/${id}?scanId=${scanId}`, { headers: { 'x-user-id': userId } });
         if (!res.ok) throw new Error('הפרויקט לא נמצא. ייתכן שנמחק ידנית.');
         
         const data = await res.json();
         
+        clearInterval(progressInterval);
+        progressFill.style.width = '100%';
+        progressText.innerText = '100%';
+
         setTimeout(() => {
           Graph.graphData(data);
           hideModal(); 
           overlay.style.display = 'none';
-        }, 600); // השהיה קטנטנה בשביל חוויית משתמש חלקה
+        }, 600);
       } catch (err) {
+        clearInterval(progressInterval);
         alert('❌ שגיאה: ' + err.message);
         overlay.style.display = 'none';
       }
